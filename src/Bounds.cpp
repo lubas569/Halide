@@ -1039,11 +1039,33 @@ private:
                     if (op->is_intrinsic(Call::shift_left)) {
                         if (t.is_int() && t.bits() >= 32) {
                             // Overflow is UB
-                            if (a_interval.has_lower_bound() && b_interval.has_lower_bound() && can_prove(b_interval.min >= 0 && b_interval.min < t.bits())) {
+                            // The following two Exprs are to avoid warning
+                            // messages that abs of an unsigned type is a no-op.
+                            Expr abs_b_interval_min =
+                                b_interval.min.type().is_int() ? abs(b_interval.min) : b_interval.min;
+                            Expr abs_b_interval_max =
+                                b_interval.max.type().is_int() ? abs(b_interval.max) : b_interval.max;
+                            if (a_interval.has_lower_bound() &&
+                                b_interval.has_lower_bound() &&
+                                can_prove(b_interval.min >= 0 &&
+                                          b_interval.min < t.bits())) {
                                 interval.min = a_interval.min << b_interval.min;
+                            } else if (a_interval.has_lower_bound() &&
+                                       b_interval.has_lower_bound() &&
+                                       can_prove(b_interval.min < 0 &&
+                                                 abs_b_interval_min < t.bits())) {
+                                interval.min = a_interval.min >> abs(b_interval.min);
                             }
-                            if (a_interval.has_upper_bound() && b_interval.has_upper_bound() && can_prove(b_interval.max >= 0 && b_interval.max < t.bits())) {
+                            if (a_interval.has_upper_bound() &&
+                                b_interval.has_upper_bound() &&
+                                can_prove(b_interval.max >= 0 &&
+                                          b_interval.max < t.bits())) {
                                 interval.max = a_interval.max << b_interval.max;
+                            } else if (a_interval.has_upper_bound() &&
+                                       b_interval.has_upper_bound() &&
+                                       can_prove(b_interval.max < 0 &&
+                                                 abs_b_interval_max < t.bits())) {
+                                interval.max = a_interval.max >> abs(b_interval.max);
                             }
                         } else if (is_const(b)) {
                             // We can normalize to multiplication
@@ -1054,26 +1076,52 @@ private:
                         // Only try to improve on bounds-of-type if we can prove 0 <= b < t.bits,
                         // as shift_right(a, b) is UB for b outside that range.
                         if (b_interval.is_bounded()) {
-                            bool b_min_ok = can_prove(b_interval.min >= 0 && b_interval.min < t.bits());
-                            bool b_max_ok = can_prove(b_interval.max >= 0 && b_interval.max < t.bits());
+                            bool b_min_ok_positive = can_prove(b_interval.min >= 0 &&
+                                                               b_interval.min < t.bits());
+                            bool b_max_ok_positive = can_prove(b_interval.max >= 0 &&
+                                                               b_interval.max < t.bits());
+                            // The following two Exprs are to avoid warning
+                            // messages that abs of an unsigned type is a no-op.
+                            Expr abs_b_interval_min =
+                                b_interval.min.type().is_int() ? abs(b_interval.min) : b_interval.min;
+                            Expr abs_b_interval_max =
+                                b_interval.max.type().is_int() ? abs(b_interval.max) : b_interval.max;
+                            bool b_min_ok_negative = can_prove(b_interval.min < 0 &&
+                                                               abs_b_interval_min < t.bits());
+                            bool b_max_ok_negative = can_prove(b_interval.max < 0 &&
+                                                               abs_b_interval_max < t.bits());
                             if (a_interval.has_lower_bound()) {
-                                if (can_prove(a_interval.min >= 0) && b_max_ok) {
+                                if (can_prove(a_interval.min >= 0) && b_max_ok_positive) {
                                     interval.min = a_interval.min >> b_interval.max;
-                                } else if (b_min_ok && b_max_ok) {
+                                } else if (can_prove(a_interval.min < 0) && b_max_ok_negative) {
+                                    interval.min = a_interval.min << abs(b_interval.max);
+                                } else if (b_min_ok_positive && b_max_ok_positive) {
                                     // if a < 0, the smallest value will be a >> b.min
                                     // if a > 0, the smallest value will be a >> b.max
                                     interval.min = min(a_interval.min >> b_interval.min,
                                                        a_interval.min >> b_interval.max);
+                                } else if (b_min_ok_negative && b_max_ok_negative) {
+                                    // if a < 0, the smallest value will be a << abs(b.min)
+                                    // if a > 0, the smallest value will be a << abs(b.max)
+                                    interval.min = min(a_interval.min << abs(b_interval.min),
+                                                       a_interval.min << abs(b_interval.max));
                                 }
                             }
                             if (a_interval.has_upper_bound()) {
-                                if (can_prove(a_interval.max >= 0) && b_min_ok) {
+                                if (can_prove(a_interval.max >= 0) && b_min_ok_positive) {
                                     interval.max = a_interval.max >> b_interval.min;
-                                } else if (b_min_ok && b_max_ok) {
+                                } else if (can_prove(a_interval.max < 0) && b_min_ok_negative) {
+                                    interval.max = a_interval.max << abs(b_interval.min);
+                                } else if (b_min_ok_positive && b_max_ok_positive) {
                                     // if a < 0, the largest value will be a >> b.max
                                     // if a > 0, the largest value will be a >> b.min
                                     interval.max = max(a_interval.max >> b_interval.max,
                                                        a_interval.max >> b_interval.min);
+                                } else if (b_min_ok_negative && b_max_ok_negative) {
+                                    // if a < 0, the largest value will be a << abs(b.max)
+                                    // if a > 0, the largest value will be a << abs(b.min)
+                                    interval.max = max(a_interval.max << abs(b_interval.max),
+                                                       a_interval.max << abs(b_interval.min));
                                 }
                             }
                         }

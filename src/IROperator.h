@@ -1542,22 +1542,11 @@ inline Expr operator~(Expr x) {
  * arguments must have integer type. */
 // @{
 inline Expr operator<<(Expr x, Expr y) {
-    Expr unsigned_amount = lossless_cast(UInt(x.type().bits(), y.type().lanes()), y);
-    user_assert(unsigned_amount.defined())
-        << "In shift left expression:\n"
-        << "   (" << x << ") << (" << y << ")\n"
-        << "   with types " << x.type() << " << " << y.type() << "\n"
-        << "the RHS must be unsigned and losslessly castable to the same size as the LHS.\n";
-
-    if (y.type().is_vector() && !x.type().is_vector()) {
-        x = Internal::Broadcast::make(x, y.type().lanes());
-    }
-
     Type t = x.type();
-    return Internal::Call::make(t, Internal::Call::shift_left, {std::move(x), std::move(unsigned_amount)}, Internal::Call::PureIntrinsic);
+    return Internal::Call::make(t, Internal::Call::shift_left, {std::move(x), std::move(y)}, Internal::Call::PureIntrinsic);
 }
 inline Expr operator<<(Expr x, int y) {
-    Type t = UInt(x.type().bits(), x.type().lanes());
+    Type t = Int(x.type().bits(), x.type().lanes());
     Internal::check_representable(t, y);
     return std::move(x) << Internal::make_const(t, y);
 }
@@ -1573,20 +1562,11 @@ inline Expr operator<<(Expr x, int y) {
  * type. */
 // @{
 inline Expr operator>>(Expr x, Expr y) {
-    Expr unsigned_amount = lossless_cast(UInt(x.type().bits(), y.type().lanes()), y);
-    user_assert(unsigned_amount.defined())
-        << "In shift right expression:\n"
-        << "   (" << x << ") >> (" << y << ")\n"
-        << "   with types " << x.type() << " >> " << y.type() << "\n"
-        << "the RHS must be unsigned and losslessly castable to the same size as the LHS.\n";
-    if (y.type().is_vector() && !x.type().is_vector()) {
-        x = Internal::Broadcast::make(x, y.type().lanes());
-    }
     Type t = x.type();
-    return Internal::Call::make(t, Internal::Call::shift_right, {std::move(x), std::move(unsigned_amount)}, Internal::Call::PureIntrinsic);
+    return Internal::Call::make(t, Internal::Call::shift_right, {std::move(x), std::move(y)}, Internal::Call::PureIntrinsic);
 }
 inline Expr operator>>(Expr x, int y) {
-    Type t = UInt(x.type().bits(), x.type().lanes());
+    Type t = Int(x.type().bits(), x.type().lanes());
     Internal::check_representable(t, y);
     return std::move(x) >> Internal::make_const(t, y);
 }
@@ -2070,3 +2050,4 @@ Expr unsafe_promise_clamped(Expr value, Expr min, Expr max);
 }  // namespace Halide
 
 #endif
+

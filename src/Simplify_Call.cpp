@@ -1,5 +1,7 @@
 #include "Simplify_Internal.h"
 
+#include "Simplify.h"
+
 #ifdef _MSC_VER
 #include <intrin.h>
 #endif
@@ -125,28 +127,39 @@ Expr Simplify::visit(const Call *op, ExprInfo *bounds) {
             return a;
         }
 
-        const bool shift_left = op->is_intrinsic(Call::shift_left);
         const Type t = op->type;
+        const bool b_pos = is_positive_const(b);
+        const bool b_neg = is_negative_const(b);
+        const bool const_shift_left = ((op->is_intrinsic(Call::shift_left) && b_pos) ||
+                                       (op->is_intrinsic(Call::shift_right) && b_neg));
+        const bool const_shift_right = ((op->is_intrinsic(Call::shift_right) && b_pos) ||
+                                        (op->is_intrinsic(Call::shift_left) && b_neg));
 
         uint64_t ub = 0;
-        if (const_uint(b, &ub)) {
-            // LLVM shl and shr instructions produce poison for negative shifts,
-            // or for shifts >= typesize, so we will follow suit in our simplifier.
+        int64_t sb = 0;
+        bool is_const_uint = const_uint(b, &ub);
+        bool is_const_int = const_int(b, &sb);
+        if (is_const_uint || is_const_int) {
+            if (is_const_int) {
+                ub = std::abs(sb);
+            }
+            // LLVM shl and shr instructions produce poison for
+            // shifts >= typesize, so we will follow suit in our simplifier.
             user_assert(ub < (uint64_t)t.bits()) << "bitshift by a constant amount >= the type size is not legal in Halide.";
-            if (a.type().is_uint() || ub < (uint64_t)t.bits() - 1) {
+            if (a.type().is_uint() || ub < ((uint64_t)t.bits() - 1)) {
                 b = make_const(t, ((int64_t) 1LL) << ub);
-                if (shift_left) {
+                if (const_shift_left) {
                     return mutate(Mul::make(a, b), bounds);
-                } else {
+                } else if (const_shift_right) {
                     return mutate(Div::make(a, b), bounds);
                 }
             } else {
                 // For signed types, (1 << ub) will overflow into the sign bit while
                 // (-32768 >> ub) propagates the sign bit, making decomposition
-                // into mul or div probelmatic, so just special-case them here.
-                if (shift_left) {
+                // into mul or div problematic, so just special-case them here.
+                if (const_shift_left) {
                     return mutate(select((a & 1) != 0, make_const(t, ((int64_t) 1LL) << ub), make_zero(t)), bounds);
-                } else {
+                } else if (const_shift_right) {
                     return mutate(select(a < 0, make_const(t, -1), make_zero(t)), bounds);
                 }
             }
